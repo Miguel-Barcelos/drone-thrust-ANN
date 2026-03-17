@@ -1,0 +1,290 @@
+clear; clc; close all;
+
+% Carregar Dados 
+dados = readtable('DataBase_RNA.xlsx');
+tempo_s = dados.TempoDecorrido_s_;
+potencia = dados.PotenciaReal___;
+corrente_a = dados.Corrente_A_;
+empuxo_g = dados.Peso_g_;
+
+% Definição de entradas e saídas
+inputs_brutos = [tempo_s, potencia, corrente_a]';
+targets_brutos = empuxo_g';
+
+% Normalização 
+[inputs, settings_in] = mapminmax(inputs_brutos, 0, 1); % Entradas
+[targets, settings_out] = mapminmax(targets_brutos, 0, 1); % Saídas
+
+
+% Plot dos dados originais(Brutos)
+figure;
+subplot(2,1,1);
+yyaxis left
+plot(tempo_s, potencia, 'rx'); hold on;
+plot(tempo_s, empuxo_g, 'bx', 'LineWidth', 1.2);
+ylabel('Potência (%) / Peso (g)');
+yyaxis right
+plot(tempo_s, corrente_a, 'gx');
+ylabel('Corrente (A)');
+title('Dados Brutos (Escalas Distintas)');
+legend('Potência', 'Peso', 'Corrente', 'Location', 'northeast');
+grid on;
+
+% Plot dos dados normalizados
+subplot(2,1,2);
+plot(tempo_s, inputs(2,:), 'rx'); hold on; % Potência
+plot(tempo_s, inputs(3,:), 'gx');          % Corrente
+plot(tempo_s, targets(1,:), 'bx');         % Empuxo
+title('Dados Normalizados via mapminmax (Escala 0-1)');
+ylabel('Valor Normalizado');
+xlabel('Tempo (s)');
+legend('Potência Norm.', 'Corrente Norm.', 'Peso Norm.', 'Location', 'northeast');
+grid on;
+
+sgtitle('Comparativo de Pré-processamento para RNA');
+
+
+% Treinamento
+hiddenLayerSize = 20; % Número de neurônios na camada oculta 
+net = feedforwardnet(hiddenLayerSize);
+net.layers{1}.transferFcn = 'logsig'; % Define a função da camada oculta
+net.divideParam.trainRatio = 80/100; % 80% dos dados para treinamento
+net.divideParam.valRatio   = 10/100; % 10% dos dados para validação
+net.divideParam.testRatio  = 10/100; % 10% dos dados para teste
+
+[net, tr] = train(net, inputs, targets); % net = rede treinada | tr = registro do treinamento.
+
+% Pesos e bias
+pesos_entrada_oculta = net.IW{1,1};
+biases_oculta = net.b{1};
+pesos_oculta_saida = net.LW{2,1};
+bias_saida = net.b{2};
+
+fprintf('Pesos da Entrada para a Camada Oculta:\n');
+disp(pesos_entrada_oculta);
+
+fprintf('Biases da Camada Oculta:\n');
+disp(biases_oculta);
+
+fprintf('Pesos da Camada Oculta para a Camada de Saída:\n');
+disp(pesos_oculta_saida);
+
+fprintf('Bias da Camada de Saída:\n');
+disp(bias_saida);
+
+
+% RESULTADOS
+
+% Índices dos dados utilziados em cada etapa
+train_indices = tr.trainInd;
+val_indices = tr.valInd;
+test_indices = tr.testInd;
+
+% Valores dos dados utilizados em cada etapa
+train_inputs_norm = inputs(:, train_indices);
+val_inputs_norm = inputs(:, val_indices);
+test_inputs_norm = inputs(:, test_indices);
+
+% Valores normalizados dos dados utilizados em cada etapa
+train_targets_norm = targets(:, train_indices);
+val_targets_norm = targets(:, val_indices);
+test_targets_norm = targets(:, test_indices);
+
+val_outputs_norm = net(val_inputs_norm); % Previsões de dados de validação (normalizadas)
+test_outputs_norm = net(test_inputs_norm); % Previsões de dados de teste (normalizadas)
+
+% Desnormalização
+% Entradas e saída
+inputs_reais = mapminmax('reverse', inputs, settings_in);
+targets_reais = mapminmax('reverse', targets, settings_out);
+% Dados de validação estimados e reais
+val_targets_real = targets_reais(val_indices);
+val_outputs_real = mapminmax('reverse', val_outputs_norm, settings_out);
+% Dados de teste estimados e reais
+test_targets_real = targets_reais(test_indices);
+test_outputs_real = mapminmax('reverse', test_outputs_norm, settings_out);
+
+% Criar variáveis específicas para os gráficos usando os índices
+eixo_x_potencia_real = inputs_reais(2, :); % Vamos usar a Potência como Eixo X
+
+% Grafico Real x Estimado
+figure('Name', 'Real (O) vs. Estimado (X)');
+subplot(1, 2, 1); 
+plot(eixo_x_potencia_real(val_indices), val_targets_real, 'bo','LineWidth', 1);
+hold on;
+plot(eixo_x_potencia_real(val_indices), val_outputs_real, 'rx','LineWidth', 1);
+title('Validação');
+xlabel('Potência');
+ylabel('Empuxo (g)');
+legend('Real', 'Estimado');
+grid on;
+
+subplot(1, 2, 2); 
+plot(eixo_x_potencia_real(test_indices), test_targets_real, 'bo','LineWidth', 1);
+hold on;
+plot(eixo_x_potencia_real(test_indices), test_outputs_real, 'rx','LineWidth', 1);
+title('Teste');
+xlabel('Potência');
+ylabel('Empuxo (g)');
+legend('Real', 'Estimado');
+grid on;
+
+% Grafico de dispersão
+% Validação
+figure('Name', 'Dispersão dos Resultados');
+subplot(1, 2, 1); 
+scatter(val_targets_real, val_outputs_real, 36, 'r', 'filled', 'MarkerFaceAlpha', 0.5);
+hold on; 
+lims = [min(xlim) max(xlim)];
+plot(lims, lims, 'g--', 'LineWidth', 2); 
+title('Validação');
+xlabel('Empuxo Real (g)');
+ylabel('Empuxo Previsto (g)');
+legend('Previsões da Rede', 'Previsão Perfeita', 'Location', 'northwest');
+grid on;
+axis equal;
+hold off;
+% Teste
+subplot(1, 2, 2);
+scatter(test_targets_real, test_outputs_real, 36, 'r', 'filled', 'MarkerFaceAlpha', 0.5);
+hold on;
+lims = [min(xlim) max(xlim)];
+plot(lims, lims, 'g--', 'LineWidth', 2);
+title('Teste');
+xlabel('Empuxo Real (g)');
+ylabel('Empuxo Previsto (g)');
+legend('Previsões da Rede', 'Previsão Perfeita', 'Location', 'northwest');
+grid on;
+axis equal;
+hold off;
+
+% Cálculo de acurácia
+reais = test_targets_real';   % Valores reais
+estimados = test_outputs_real'; % Valores previstos
+
+% Porcentagem de erro da saída
+%indices_nao_zero = reais ~= 0;
+%erro_percentual = abs((reais(indices_nao_zero) - estimados(indices_nao_zero)) ./ reais(indices_nao_zero));
+%mape_test = mean(erro_percentual) * 100;
+
+%fprintf('\nDesempenho do Modelo:\n');
+%rmse_test_real = sqrt(mean((reais - estimados).^2));
+%fprintf('Erro Quadrático Médio: +ou- %.2f (gramas)\n', rmse_test_real);
+%fprintf('Erro Médio Percentual : %.2f%% \n', mape_test);
+% --- CÁLCULO DAS MÉTRICAS DE DESEMPENHO ---
+
+
+
+% 2. Erro Médio Absoluto (MAE)
+% Mede a magnitude média do erro em gramas
+mae_test = mean(abs(reais - estimados));
+
+% 3. Erro Quadrático Médio (RMSE)
+% Penaliza erros maiores; ideal para detectar outliers
+rmse_test = sqrt(mean((reais - estimados).^2));
+
+% 4. Erro Médio Percentual Absoluto (MAPE)
+% Bom para entender o erro em relação à escala (ignora zeros para evitar Inf)
+indices_val_mape = reais ~= 0;
+mape_test = mean(abs((reais(indices_val_mape) - estimados(indices_val_mape)) ./ reais(indices_val_mape))) * 100;
+
+% 5. Coeficiente de Determinação (R²)
+% Mede a aderência do modelo aos dados (proximidade de 1)
+S_res = sum((reais - estimados).^2);       % Soma dos quadrados dos resíduos
+S_tot = sum((reais - mean(reais)).^2);     % Soma total dos quadrados
+r2_test = 1 - (S_res / S_tot);
+
+% --- EXIBIÇÃO DOS RESULTADOS NO CONSOLE ---
+fprintf('\n========================================\n');
+fprintf('   RELATÓRIO DE DESEMPENHO DA REDE\n');
+fprintf('========================================\n');
+fprintf('MAE (Erro Médio Absoluto):      %.4f g\n', mae_test);
+fprintf('RMSE (Raiz do Erro Quadrático): %.4f g\n', rmse_test);
+fprintf('MAPE (Erro Médio Percentual):   %.2f %%\n', mape_test);
+fprintf('R² (Coeficiente de Ajuste):     %.4f\n', r2_test);
+fprintf('========================================\n');
+
+% --- VISUALIZAÇÃO DOS RESÍDUOS ---
+figure('Name', 'Análise de Resíduos');
+residuos = reais - estimados;
+histogram(residuos, 15, 'FaceColor', [0.2 0.4 0.6]);
+title('Distribuição de Erros (Resíduos)');
+xlabel('Erro (Gramas)');
+ylabel('Frequência');
+grid on;
+
+
+
+% Equações do modelo da planta
+
+% Extrair os pesos e biases do objeto 'net' treinado
+%W1 = net.IW{1,1};     % Pesos da entrada para a camada oculta [5x2]
+%B1 = net.b{1};        % Biases da camada oculta [5x1]
+%W2 = net.LW{2,1};     % Pesos da camada oculta para a de saída [1x5]
+%B2 = net.b{2};        % Bias da camada de saída [1x1]
+
+% 2. Gerar as equações para cada neurônio da camada oculta
+fprintf('Onde T = Tempo, P = Potência e C = Corrente\n');
+fprintf('A função de ativação é logsig(x) = 1 / (1 + exp(-x))\n\n');
+
+fprintf('Equações dos Neurônios (Entradas: T=Tempo, P=Potência, C=Corrente):\n');
+for i = 1:size(pesos_entrada_oculta, 1) % Loop para cada neurônio
+     w = pesos_entrada_oculta(i, :); % Pega os 3 pesos do neurônio i
+    fprintf('N%d = logsig( (%.4f*T) + (%.4f*P) + (%.4f*C) + (%.4f) )\n', ...
+            i, w(1), w(2), w(3), biases_oculta(i));
+end
+
+% 3. Gerar a equação final da camada de saída
+fprintf('\n\n** Modelo final que representa a aproximação da saída da planta: **\n\n');
+fprintf('EMPUXO (g) = ...\n');
+
+% Constrói a string da equação final
+equacao_final = '';
+for i = 1:size(pesos_oculta_saida, 2) % Loop para cada peso da camada de saída
+    peso_ni = pesos_oculta_saida(1, i);
+    equacao_final = [equacao_final, sprintf('(%.4f * N%d) + ', peso_ni, i)];
+end
+
+% Adiciona o bias final e remove o último " + "
+equacao_final = [equacao_final, sprintf('(%.4f)', bias_saida(1))];
+
+fprintf('%s\n', equacao_final);
+fprintf('------------------------------------------------------------\n');
+
+
+
+% 
+% % TESTE REAL
+% 
+% % Valores para teste [Potência em PWM; Corrente em A]
+% ponto1_real = [25.5; 0.75];  
+% ponto2_real = [27.5; 0.84];
+% ponto3_real = [29; 0.43];
+% ponto4_real = [34; 1.1];
+% ponto5_real = [44; 1.58];
+% 
+% 
+% % Normaliza os novos pontos USANDO OS MESMOS VALORES min/max do treino original
+% ponto1_norm_feat1 = (ponto1_real(1) - min_input1) / (max_input1 - min_input1);
+% ponto1_norm_feat2 = (ponto1_real(2) - min_input2) / (max_input2 - min_input2);
+
+% novas_entradas_norm = [[ponto1_norm_feat1; ponto1_norm_feat2], [ponto2_norm_feat1; ponto2_norm_feat2],[ponto3_norm_feat1; ponto3_norm_feat2], [ponto4_norm_feat1; ponto4_norm_feat2],[ponto5_norm_feat1; ponto5_norm_feat2]];
+% 
+% %Previsão dos valores NORMALIZADOS
+% previsoes_norm = net(novas_entradas_norm);
+% 
+% % DESNORMALIZAÇÃO
+% previsoes_empuxo_real = previsoes_norm * (max_output - min_output) + min_output;
+% 
+% %Exibe os resultados
+% fprintf('\n--- Previsões do Modelo (com Normalização) ---\n');
+% fprintf('Para Potência=%.1f PWM e Corrente=%.1f A, o empuxo previsto é %.2f g.\n', ...
+%         ponto1_real(1), ponto1_real(2), previsoes_empuxo_real(1));
+% fprintf('Para Potência=%.1f PWM e Corrente=%.1f A, o empuxo previsto é %.2f g.\n', ...
+%         ponto2_real(1), ponto2_real(2), previsoes_empuxo_real(2));
+% fprintf('Para Potência=%.1f PWM e Corrente=%.1f A, o empuxo previsto é %.2f g.\n', ...
+%         ponto3_real(1), ponto3_real(2), previsoes_empuxo_real(3));
+% fprintf('Para Potência=%.1f PWM e Corrente=%.1f A, o empuxo previsto é %.2f g.\n', ...
+%         ponto4_real(1), ponto4_real(2), previsoes_empuxo_real(4));
+% fprintf('Para Potência=%.1f PWM e Corrente=%.1f A, o empuxo previsto é %.2f g.\n', ...
+%         ponto5_real(1), ponto5_real(2), previsoes_empuxo_real(5));
