@@ -14,8 +14,8 @@ A inclusão da variável temporal atua como um estimador indireto para contornar
 ## 📂 Estrutura do Repositório
 
 *   `/data`: Matriz de dados experimentais contendo as coletas realizadas na bancada estática.
-*   `/src`: Scripts utilizados para o tratamento dos dados, arquitetura e treinamento da rede neural.
-*   `/models`: Arquivos dos modelos/pesos já treinados e prontos para execução.
+*   `/src`: Scripts utilizados para o tratamento dos dados, arquitetura, treinamento da rede neural e execução de testes de bancada.
+*   `/project`: Figuras do desenvolvimento do projeto e arquivo CAD da bancada de teste.
 *   `/figures`: Gráficos de desempenho do modelo (regressão, análise de erro e épocas de treinamento).
 
 ## 📊 Variáveis do Modelo
